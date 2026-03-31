@@ -17,7 +17,7 @@
 
 Name:           redisearch
 Version:        8.6.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Full-text search, vector similarity, and secondary indexing for Redis
 
 License:        AGPL-3.0-only AND MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause
@@ -29,11 +29,15 @@ Source0:        https://github.com/AngelYanev/redisearch-rpm/releases/download/v
 Source1:        https://github.com/AngelYanev/redisearch-rpm/releases/download/v%{version}/%{name}-vendor-%{version}.tar.gz
 # google/cpu_features — required by VectorSimilarity, fetched at build time upstream
 Source2:        https://github.com/google/cpu_features/archive/refs/tags/v0.10.1.tar.gz#/cpu_features-0.10.1.tar.gz
+# ScalableVectorSearch FetchContent deps — bundled for offline builds
+Source3:        https://github.com/jfalcou/eve/archive/refs/tags/v2023.02.15.tar.gz#/eve-2023.02.15.tar.gz
+Source4:        https://github.com/Tessil/robin-map/archive/refs/tags/v1.4.0.tar.gz#/robin-map-1.4.0.tar.gz
+Source5:        https://github.com/fmtlib/fmt/archive/refs/tags/11.2.0.tar.gz#/fmt-11.2.0.tar.gz
+Source6:        https://github.com/gabime/spdlog/archive/refs/tags/v1.15.3.tar.gz#/spdlog-1.15.3.tar.gz
+Source7:        https://github.com/marzer/tomlplusplus/archive/refs/tags/v3.3.0.tar.gz#/tomlplusplus-3.3.0.tar.gz
 
-# VectorSimilarity includes SVS headers unconditionally even when HAVE_SVS=0
-Patch0:         redisearch-svs-header-guard.patch
 # Boost >= 1.86 changed sha1::get_digest() signature
-Patch1:         redisearch-boost-sha1-compat.patch
+Patch0:         redisearch-boost-sha1-compat.patch
 
 # Private bundled shared libs live alongside redisearch.so — filter them out
 # of auto-generated RPM requires/provides so they don't leak as system deps.
@@ -66,6 +70,13 @@ Provides:       bundled(s2geometry) = 0.10.0~git.efb4eb8d
 Provides:       bundled(RedisModulesSDK) = 0~git.8ecae317
 Provides:       bundled(cpu_features) = 0.10.1
 Provides:       bundled(readies)
+
+# ---------- Bundled ScalableVectorSearch FetchContent dependencies ----------
+Provides:       bundled(eve) = 2023.02.15
+Provides:       bundled(robin-map) = 1.4.0
+Provides:       bundled(fmt) = 11.2.0
+Provides:       bundled(spdlog) = 1.15.3
+Provides:       bundled(tomlplusplus) = 3.3.0
 
 # ---------- Bundled C/C++ vendored-in-tree dependencies ----------
 Provides:       bundled(snowball) = 2.1.0
@@ -143,11 +154,25 @@ a Redis server with the MODULE LOAD command or via configuration.
 %prep
 %autosetup -p1 -a1 -n %{name}-%{version}
 
-: Unpack cpu_features beside the source tree so CMake can find it
+: Unpack FetchContent dependencies for offline builds
 tar xzf %{SOURCE2}
+tar xzf %{SOURCE3}
+tar xzf %{SOURCE4}
+tar xzf %{SOURCE5}
+tar xzf %{SOURCE6}
+tar xzf %{SOURCE7}
+
+: Apply SVS compatibility patch to tomlplusplus
+cd tomlplusplus-3.3.0
+patch -p1 < ../deps/VectorSimilarity/deps/ScalableVectorSearch/cmake/patches/tomlplusplus_v330.patch
+cd ..
 
 : Remove macOS AppleDouble resource fork files if present
 find . -name '._*' -delete
+
+# Strip -Werror from VectorSimilarity -- Fedora: packages must not use -Werror
+# GCC 16 fc44+ flags false positives in robin-map and upstream SVS code
+find deps/VectorSimilarity -name CMakeLists.txt -exec sed -i 's/-Werror//g' {} +
 
 : Dummy .git marker for Rust build_utils git_root
 mkdir -p .git
@@ -182,14 +207,23 @@ fi
 export CARGO_HOME=$PWD/.cargo
 export CARGO_NET_OFFLINE=true
 
+: GCC 16 safety net: demote remaining -Werror diagnostics to warnings
+export CXXFLAGS="${CXXFLAGS:-%{optflags}} -Wno-error=maybe-uninitialized -Wno-error=unused-but-set-variable"
+
 %cmake \
     -DCOORD_TYPE=oss \
     -DBOOST_DIR=%{_includedir} \
     -DREDISEARCH_BUILD_SHARED=ON \
     -DBUILD_SEARCH_UNIT_TESTS=OFF \
     -DVECSIM_BUILD_TESTS=OFF \
-    -DUSE_SVS=OFF \
+    -DSVS_SHARED_LIB=OFF \
+    -DBUILD_INTEL_SVS_OPT=0 \
     -DFETCHCONTENT_SOURCE_DIR_CPU_FEATURES=$PWD/cpu_features-0.10.1 \
+    -DFETCHCONTENT_SOURCE_DIR_EVE=$PWD/eve-2023.02.15 \
+    -DFETCHCONTENT_SOURCE_DIR_ROBINMAP=$PWD/robin-map-1.4.0 \
+    -DFETCHCONTENT_SOURCE_DIR_FMT=$PWD/fmt-11.2.0 \
+    -DFETCHCONTENT_SOURCE_DIR_SPDLOG=$PWD/spdlog-1.15.3 \
+    -DFETCHCONTENT_SOURCE_DIR_TOMLPLUSPLUS=$PWD/tomlplusplus-3.3.0 \
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
     -DRUST_PROFILE=release
 %cmake_build
@@ -234,5 +268,9 @@ done
 
 
 %changelog
+* Tue Mar 31 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-2
+- Strip -Werror from VectorSimilarity (Fedora guideline compliance)
+- Add -Wno-error safety net for GCC 16 warnings on Fedora 44+
+
 * Fri Mar 20 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-1
 - Initial package for RediSearch module
