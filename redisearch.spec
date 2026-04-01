@@ -17,7 +17,7 @@
 
 Name:           redisearch
 Version:        8.6.0
-Release:        2%{?dist}
+Release:        4%{?dist}
 Summary:        Full-text search, vector similarity, and secondary indexing for Redis
 
 License:        AGPL-3.0-only AND MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause
@@ -41,7 +41,7 @@ Patch0:         redisearch-boost-sha1-compat.patch
 
 # Private bundled shared libs live alongside redisearch.so — filter them out
 # of auto-generated RPM requires/provides so they don't leak as system deps.
-%global __requires_exclude ^lib(VectorSimilarity|VectorSimilaritySpaces|VectorSimilaritySpaces_no_optimization|cpu_features|hiredis|hiredis_ssl)\\.so
+%global __requires_exclude ^lib(VectorSimilarity|VectorSimilaritySpaces|VectorSimilaritySpaces_no_optimization|cpu_features|hiredis|hiredis_ssl|fmt|spdlog)\\.so
 %global __provides_exclude_from ^%{redis_modules_dir}/.*$
 
 ExclusiveArch:  x86_64 aarch64
@@ -244,16 +244,30 @@ for f in %{__cmake_builddir}/hiredis/libhiredis.so.* \
          %{__cmake_builddir}/hiredis/libhiredis_ssl.so.*; do
     [ -L "$f" ] || [ ! -f "$f" ] || install -pm755 "$f" %{buildroot}%{redis_modules_dir}/
 done
-pushd %{buildroot}%{redis_modules_dir}
-for f in libhiredis.so.1.*.* libhiredis_ssl.so.1.*.*; do
-    [ -f "$f" ] && ln -sf "$f" "${f%.*.*}"
-done
-popd
 
-# Set RPATH to $ORIGIN so companion libs are found at runtime.
-for f in %{buildroot}%{redis_modules_dir}/*.so*; do
-    [ -L "$f" ] && continue
-    patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true
+# Install bundled fmt and spdlog shared libs (built by FetchContent).
+# VectorSimilarity links against these; install them so the module is
+# self-contained rather than accidentally relying on system packages.
+for lib in fmt spdlog; do
+    find %{__cmake_builddir}/_deps/${lib}-build -name "lib${lib}.so*" \
+        ! -type l -exec install -pm755 {} %{buildroot}%{redis_modules_dir}/ \;
+done
+# Let ldconfig create proper soname symlinks for all companion libraries.
+ldconfig -n %{buildroot}%{redis_modules_dir}
+
+# Set RPATH to $ORIGIN only on libraries that load companion .so from
+# the same directory.  Leaf libraries (hiredis, cpu_features, fmt,
+# VectorSimilaritySpaces_no_optimization) must NOT be patchelf'd —
+# patchelf can corrupt simple ELFs that lack complex program headers.
+# libspdlog needs patchelf to replace its build-time RPATH to fmt-build.
+for f in %{buildroot}%{redis_modules_dir}/redisearch.so \
+         %{buildroot}%{redis_modules_dir}/libVectorSimilarity.so \
+         %{buildroot}%{redis_modules_dir}/libVectorSimilaritySpaces.so; do
+    [ -f "$f" ] && patchelf --set-rpath '$ORIGIN' "$f"
+done
+# spdlog has a build-time RPATH baked in by CMake — replace it.
+for f in %{buildroot}%{redis_modules_dir}/libspdlog.so.*; do
+    [ -f "$f" ] && [ ! -L "$f" ] && patchelf --set-rpath '$ORIGIN' "$f"
 done
 
 
@@ -268,6 +282,14 @@ done
 
 
 %changelog
+* Wed Apr 01 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-4
+- Remove libfmt from patchelf targets (leaf library, no RPATH needed)
+
+* Wed Apr 01 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-3
+- Fix patchelf corrupting leaf companion libraries on x86_64
+- Install bundled libfmt and libspdlog as companion libraries
+- Only set RPATH on libraries that load companions from $ORIGIN
+
 * Tue Mar 31 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-2
 - Strip -Werror from VectorSimilarity (Fedora guideline compliance)
 - Add -Wno-error safety net for GCC 16 warnings on Fedora 44+
