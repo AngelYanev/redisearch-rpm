@@ -3,7 +3,7 @@ VERSION  := $(shell sed -n '/^Version:/{s/.* //;p}' $(NAME).spec)
 SRPM     := $(NAME)-$(VERSION)-$(shell sed -n '/^Release:/{s/.* //;s/%{?dist}/.fc43/;p}' $(NAME).spec).src.rpm
 MOCK_CFG ?= fedora-43-$(shell uname -m)
 
-.PHONY: download sources deps srpm mock copr lint clean help
+.PHONY: download sources deps srpm mock copr verify lint clean help
 
 # Download source tarballs from spec URLs
 download:
@@ -23,6 +23,10 @@ mock: srpm
 # Submit SRPM to COPR
 copr: srpm
 	copr-cli build @redis/redis $(SRPM)
+
+# EC2/Fedora: spectool, mock, install, Redis MODULE LOAD (see verify-on-fedora.sh)
+verify:
+	./verify-on-fedora.sh
 
 # Run rpmlint on the spec
 lint:
