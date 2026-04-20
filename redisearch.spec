@@ -3,8 +3,10 @@
 # SPDX-FileCopyrightText: Copyright 2026 Angel Yanev
 # SPDX-License-Identifier: MIT
 #
-# Please, preserve the changelog entries
 #
+
+# Upstream RediSearch sources and release tarballs (makesrc/makedeps still tag v%{upstream_version}).
+%global upstream_version 8.6.0
 
 %global cfgname search.conf
 %global libname redisearch.so
@@ -16,17 +18,17 @@
 %global forgeurl https://github.com/%{gh_vend}/%{gh_proj}
 
 Name:           redisearch
-Version:        8.6.0
-Release:        10%{?dist}
+Version:        1.0.0
+Release:        1%{?dist}
 Summary:        Full-text search, vector similarity, and secondary indexing for Redis
 
 License:        AGPL-3.0-only AND MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause
 URL:            %{forgeurl}
 
 # Source tarball includes git submodules (created by makesrc.sh)
-Source0:        https://github.com/AngelYanev/redisearch-rpm/releases/download/v%{version}/%{name}-%{version}.tar.gz
+Source0:        https://github.com/AngelYanev/redisearch-rpm/releases/download/v%{upstream_version}/%{name}-%{upstream_version}.tar.gz
 # Vendored Rust crates + .cargo/config.toml + license manifest (created by makedeps.sh)
-Source1:        https://github.com/AngelYanev/redisearch-rpm/releases/download/v%{version}/%{name}-vendor-%{version}.tar.gz
+Source1:        https://github.com/AngelYanev/redisearch-rpm/releases/download/v%{upstream_version}/%{name}-vendor-%{upstream_version}.tar.gz
 # google/cpu_features — required by VectorSimilarity, fetched at build time upstream
 Source2:        https://github.com/google/cpu_features/archive/refs/tags/v0.10.1.tar.gz#/cpu_features-0.10.1.tar.gz
 # ScalableVectorSearch FetchContent deps — bundled for offline builds
@@ -290,7 +292,7 @@ a Redis server with the MODULE LOAD command or via configuration.
 
 
 %prep
-%autosetup -p1 -a1 -n %{name}-%{version}
+%autosetup -p1 -a1 -n %{name}-%{upstream_version}
 
 : Unpack FetchContent dependencies for offline builds
 tar xzf %{SOURCE2}
@@ -420,33 +422,5 @@ done
 
 
 %changelog
-* Sun Apr 19 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-10
-- Drop ``rust-nix*`` %%BuildRequires; ship ``nix`` from ``Source1`` vendor only and record ``bundled(crate(nix))`` (COPR cannot satisfy rust-nix packages reliably).
-
-* Sat Apr 18 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-9
-- Use ``rust-nix0.26-devel`` (crate 0.26.x). Do not use ``rust-nix-devel`` (0.30+) or ``rust-nix-0.26-devel`` (not a Fedora name). Avoid ``rust-nix0.26+default-devel`` in ``BuildRequires`` — the ``+`` subpackage name is not resolved reliably by ``dnf5 builddep`` in COPR/mock.
-
-* Sat Apr 18 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-8
-- Use ``rust-nix0.26+default-devel`` (not ``rust-nix-0.26-devel``, which is not a Fedora name; umbrella ``rust-nix0.26-devel`` can fail ``dnf5 builddep`` in COPR).
-- Fix ``%%changelog`` weekday/date so entries are valid descending order for rpmbuild.
-
-* Fri Apr 17 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-6
-- Inline ``rust-*-devel`` %%BuildRequires from ``fedora_crate_audit.py`` (same policy as redisjson).
-
-* Wed Apr 01 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-5
-- Drop redisearch-boost-sha1-compat.patch (fix merged into upstream source)
-
-* Wed Apr 01 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-4
-- Remove libfmt from patchelf targets (leaf library, no RPATH needed)
-
-* Wed Apr 01 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-3
-- Fix patchelf corrupting leaf companion libraries on x86_64
-- Install bundled libfmt and libspdlog as companion libraries
-- Only set RPATH on libraries that load companions from $ORIGIN
-
-* Tue Mar 31 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-2
-- Strip -Werror from VectorSimilarity (Fedora guideline compliance)
-- Add -Wno-error safety net for GCC 16 warnings on Fedora 44+
-
-* Fri Mar 20 2026 Angel Yanev <angel.yanev@redis.com> - 8.6.0-1
-- Initial package for RediSearch module
+* Tue Apr 14 2026 Angel Yanev <angel.yanev@redis.com> - 1.0.0-1
+- Development packaging: RPM ``Version`` 1.0.0; upstream sources and tarballs remain ``%{upstream_version}`` (see ``%%global upstream_version``).

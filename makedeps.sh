@@ -1,23 +1,23 @@
 #!/bin/bash
 # Create vendored Rust dependencies tarball from the main source archive.
-# Produces: <name>-deps-<version>.tgz containing mycargo/ (vendored crates
-# with .cargo/config.toml) and rust-vendor-licenses.txt.
+# Produces: <name>-vendor-<upstream_version>.tgz (see %%global upstream_version) with mycargo/,
+# .cargo/config.toml, and rust-vendor-licenses.txt.
 # Requires: makesrc.sh to have been run first (or the source tgz to exist).
 # Usage: ./makedeps.sh
 
 NAME=$(basename "$PWD")
 PROJECT=$(sed -n '/^%global gh_proj/{s/.* //;p}' "$NAME.spec")
-VERSION=$(sed -n '/^Version:/{s/.* //;p}' "$NAME.spec")
+UPSTREAM=$(awk '/^%global upstream_version /{print $3; exit}' "$NAME.spec")
 
-if [ ! -f "$NAME-$VERSION.tgz" ]; then
-    echo "$NAME-$VERSION.tgz missing — run makesrc.sh first"
+if [ ! -f "$NAME-$UPSTREAM.tgz" ]; then
+    echo "$NAME-$UPSTREAM.tgz missing — run makesrc.sh first"
     exit 1
 fi
 
 echo "+ Unpack"
-tar xf "$NAME-$VERSION.tgz"
+tar xf "$NAME-$UPSTREAM.tgz"
 
-pushd "$PROJECT-$VERSION" || exit 1
+pushd "$PROJECT-$UPSTREAM" || exit 1
 
 echo "+ Vendor Rust crates"
 cargo vendor --manifest-path src/redisearch_rs/Cargo.toml mycargo
@@ -37,10 +37,10 @@ cargo tree --workspace --offline --edges=normal --no-dedupe \
 popd
 
 echo "+ Pack"
-tar czf "../$NAME-deps-$VERSION.tgz" mycargo .cargo/config.toml rust-vendor-licenses.txt
+tar czf "../$NAME-vendor-$UPSTREAM.tgz" mycargo .cargo/config.toml rust-vendor-licenses.txt
 popd
 
 echo "+ Cleaning"
-rm -rf "$PROJECT-$VERSION"
+rm -rf "$PROJECT-$UPSTREAM"
 
-echo "Done: $NAME-deps-$VERSION.tgz"
+echo "Done: $NAME-vendor-$UPSTREAM.tgz"

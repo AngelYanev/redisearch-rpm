@@ -10,9 +10,9 @@ set -euo pipefail
 SRCDIR="${1:?Usage: $0 /path/to/RediSearch}"
 NAME=$(basename "$PWD")
 PROJECT=$(sed -n '/^%global gh_proj/{s/.* //;p}' "$NAME.spec")
-VERSION=$(sed -n '/^Version:/{s/.* //;p}' "$NAME.spec")
+UPSTREAM=$(awk '/^%global upstream_version /{print $3; exit}' "$NAME.spec")
 CPU_FEATURES_VER=$(sed -n 's|.*cpu_features-\([0-9.]*\)\.tar\.gz.*|\1|p' "$NAME.spec")
-DEST="$PROJECT-$VERSION"
+DEST="$PROJECT-$UPSTREAM"
 
 echo "==> Copying source tree"
 rm -rf "$DEST"
@@ -31,10 +31,10 @@ if [ -n "$CPU_FEATURES_VER" ]; then
         tar xz -C "$DEST"
 fi
 
-echo "==> Archiving $NAME-$VERSION.tgz"
-tar czf "$NAME-$VERSION.tgz" "$DEST"
+echo "==> Archiving $NAME-$UPSTREAM.tgz (matches %%global upstream_version in spec)"
+tar czf "$NAME-$UPSTREAM.tgz" "$DEST"
 
 echo "==> Cleaning"
 rm -rf "$DEST"
 
-echo "Done: $NAME-$VERSION.tgz"
+echo "Done: $NAME-$UPSTREAM.tgz"
