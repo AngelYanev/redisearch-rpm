@@ -24,10 +24,6 @@ mock: srpm
 copr: srpm
 	copr-cli build @redis/redis $(SRPM)
 
-# EC2/Fedora: spectool, mock, install, Redis MODULE LOAD (see verify-on-fedora.sh)
-verify:
-	./verify-on-fedora.sh
-
 # Run rpmlint on the spec
 lint:
 	rpmlint $(NAME).spec
