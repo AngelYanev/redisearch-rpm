@@ -22,6 +22,26 @@ echo "==> Cleaning VCS and macOS metadata"
 find "$DEST" -name '.git' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$DEST" -name '._*' -delete
 
+# Strip the GPL-2.0 kernel-module test fixture shipped by the ``nix`` crate.
+# It is unreachable from the released ``redisearch.so`` (it lives under
+# ``vendor/nix/test/test_kmod/`` and is only compiled by the crate's test
+# suite). Removing it here keeps fedora-review's licensecheck quiet without
+# any %%prep mutation in the spec, and we update ``.cargo-checksum.json`` so
+# the offline ``cargo build`` in the buildroot still passes integrity checks.
+NIX_VENDORED="$DEST/vendor/nix"
+if [ -f "$NIX_VENDORED/test/test_kmod/hello_mod/hello.c" ] &&
+   [ -f "$NIX_VENDORED/.cargo-checksum.json" ]; then
+    echo "==> Stripping GPL-2.0 nix kernel-module test fixture from Source0"
+    rm -f "$NIX_VENDORED/test/test_kmod/hello_mod/hello.c"
+    python3 - "$NIX_VENDORED/.cargo-checksum.json" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+d = json.loads(p.read_text())
+d["files"].pop("test/test_kmod/hello_mod/hello.c", None)
+p.write_text(json.dumps(d))
+PY
+fi
+
 echo "==> Creating .git marker for Rust build_utils::git_root()"
 mkdir -p "$DEST/.git"
 

@@ -22,6 +22,24 @@ pushd "$PROJECT-$UPSTREAM" || exit 1
 echo "+ Vendor Rust crates"
 cargo vendor --manifest-path src/redisearch_rs/Cargo.toml mycargo
 
+# Strip the GPL-2.0 kernel-module test fixture shipped by the ``nix`` crate.
+# Same rationale as in makesrc.sh — keep fedora-review's licensecheck quiet
+# without any %%prep mutation in the spec; update ``.cargo-checksum.json`` so
+# the offline ``cargo build`` in the buildroot still passes integrity checks.
+NIX_VENDORED="mycargo/nix"
+if [ -f "$NIX_VENDORED/test/test_kmod/hello_mod/hello.c" ] &&
+   [ -f "$NIX_VENDORED/.cargo-checksum.json" ]; then
+    echo "+ Strip GPL-2.0 nix kernel-module test fixture"
+    rm -f "$NIX_VENDORED/test/test_kmod/hello_mod/hello.c"
+    python3 - "$NIX_VENDORED/.cargo-checksum.json" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+d = json.loads(p.read_text())
+d["files"].pop("test/test_kmod/hello_mod/hello.c", None)
+p.write_text(json.dumps(d))
+PY
+fi
+
 echo "+ Write cargo vendor config"
 mkdir -p .cargo
 cargo vendor --manifest-path src/redisearch_rs/Cargo.toml mycargo 2>/dev/null |

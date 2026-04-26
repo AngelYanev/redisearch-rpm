@@ -5,7 +5,7 @@
 #
 #
 
-# Upstream RediSearch sources and release tarballs (makesrc/makedeps still tag v%{upstream_version}).
+# Upstream RediSearch sources and release tarballs (makesrc/makedeps tag v plus %%global upstream_version).
 %global upstream_version 8.6.0
 
 %global cfgname search.conf
@@ -22,7 +22,24 @@ Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Full-text search, vector similarity, and secondary indexing for Redis
 
-License:        AGPL-3.0-only AND MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause
+# License breakdown:
+#   Upstream RediSearch (Source0): AGPL-3.0-only.
+#   Bundled C/C++ submodules (Source0 ``deps/``): MIT (RedisModulesSDK,
+#     hiredis, libuv), Apache-2.0 (s2geometry, VectorSimilarity wrappers),
+#     BSD-3-Clause (snowball, friso), Zlib (miniz), BSL-1.0 (eve),
+#     ISC (cndict locale data), MIT (rmutil, thpool, geohash, fast_float,
+#     phonetics, nunicode), Apache-2.0 (cpu_features).
+#   Bundled FetchContent C++ deps (Source3..Source7): BSL-1.0 (eve),
+#     MIT (robin-map, fmt, spdlog), MIT (tomlplusplus).
+#   Vendored Rust crates (Source1) cover the remaining SPDX terms below;
+#     aggregated for the binary shared library in %%files. Per-crate detail is
+#     in rust-vendor-licenses.txt (installed as %%license).
+#   The "Apache-2.0 WITH LLVM-exception" leg covers ``rustix``,
+#     ``linux-raw-sys``, ``wasi``, and ``wit-bindgen`` vendored crates.
+#   Test-only kernel-module fixture in vendor/nix (GPL-2.0 ``hello.c``) is
+#     stripped from the Source0/Source1 tarballs by makesrc.sh/makedeps.sh,
+#     not shipped in the binary; GPL-2.0 is not listed.
+License:        AGPL-3.0-only AND MIT AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND Zlib AND 0BSD AND BSL-1.0 AND Unicode-DFS-2016 AND Unlicense AND MPL-2.0 AND (Apache-2.0 WITH LLVM-exception)
 URL:            %{forgeurl}
 
 # Source tarball includes git submodules (created by makesrc.sh)
@@ -283,9 +300,9 @@ Supplements:    redis
 
 %description
 RediSearch is a Redis module that adds full-text search, secondary indexing,
-vector similarity search, geo filtering, and aggregation capabilities to Redis.
-It supports query features such as prefix matching, fuzzy matching, phonetic
-matching, synonyms, and auto-complete suggestions.
+vector similarity search, geographic (GEO) filtering, and aggregation
+capabilities to Redis. It supports query features such as prefix matching,
+fuzzy matching, phonetic matching, synonyms, and auto-complete suggestions.
 
 This package contains the shared library (%{libname}) that can be loaded into
 a Redis server with the MODULE LOAD command or via configuration.
@@ -314,21 +331,45 @@ find . -name '._*' -delete
 # GCC 16 fc44+ flags false positives in robin-map and upstream SVS code
 find deps/VectorSimilarity -name CMakeLists.txt -exec sed -i 's/-Werror//g' {} +
 
+# Note: the GPL-2.0 ``vendor/nix/test/test_kmod/hello_mod/hello.c`` fixture is
+# stripped from Source0 and Source1 by makesrc.sh and makedeps.sh respectively,
+# along with the matching ``.cargo-checksum.json`` entry — no in-spec mutation.
+
 : Dummy .git marker for Rust build_utils git_root
 mkdir -p .git
 
 : Configuration file
 cat << EOF | tee %{cfgname}
-# %{gh_proj}
+# RediSearch
 loadmodule %{redis_modules_dir}/%{libname}
 EOF
 
-: Bundled project licenses
-cp -p deps/readies/LICENSE LICENSE.readies 2>/dev/null || true
-for proj in vendor/*; do
-    for lic in "$proj"/LICENSE*; do
-        [ -f "$lic" ] && cp "$lic" "$(basename "$lic").$(basename "$proj")"
-    done
+# Collect bundled-project licenses and deduplicate by content hash.
+#
+# The upstream tarball ships ``vendor/`` with 425+ LICENSE* files (one per
+# vendored Rust crate, including dev-only crates such as criterion and
+# tinytemplate that are *not* compiled into the released ``redisearch.so``).
+# Naively copying every file produced ~1.5 MB of duplicate Apache-2.0 / MIT
+# texts and dozens of rpmlint ``files-duplicate`` warnings.
+#
+# Instead, we hash each LICENSE file and keep only one canonical copy per
+# unique content, named ``LICENSE-<spdx-tag>.<short-hash>``. The mapping of
+# crate -> license is preserved in ``rust-vendor-licenses.txt`` (Source1) and
+# installed as %%license, so per-crate provenance is not lost.
+mkdir -p .licenses
+cp -p deps/readies/LICENSE .licenses/LICENSE.readies 2>/dev/null || true
+declare -A SEEN
+for lic in vendor/*/LICENSE* vendor/*/LICENCE* vendor/*/COPYING*; do
+    [ -f "$lic" ] || continue
+    h=$(sha256sum "$lic" | cut -c1-12)
+    if [ -z "${SEEN[$h]:-}" ]; then
+        base=$(basename "$lic")
+        # Strip per-crate suffix from filenames like "LICENSE-MIT-atty"
+        tag=$(echo "$base" | sed -E 's/-[a-zA-Z0-9_.+-]+$//; s/^LICENSE[._-]?//; s/^LICENCE[._-]?//; s/^COPYING[._-]?//')
+        [ -z "$tag" ] && tag=TEXT
+        install -m 0644 "$lic" ".licenses/LICENSE-${tag}.${h}"
+        SEEN[$h]=1
+    fi
 done
 
 
@@ -368,11 +409,14 @@ export CXXFLAGS="${CXXFLAGS:-%{optflags}} -Wno-error=maybe-uninitialized -Wno-er
     -DRUST_PROFILE=release
 %cmake_build
 
+%check
+# Unit tests are disabled in CMake (``BUILD_SEARCH_UNIT_TESTS=OFF``); confirm the shared module linked.
+test -x "%{__cmake_builddir}/%{libname}"
 
 %install
 install -Dpm755 %{__cmake_builddir}/%{libname} \
     %{buildroot}%{redis_modules_dir}/%{libname}
-install -Dpm640 %{cfgname} \
+install -Dpm644 %{cfgname} \
     %{buildroot}%{redis_modules_cfg}/%{cfgname}
 
 # Install companion shared libraries that redisearch.so links against.
@@ -412,15 +456,23 @@ done
 
 
 %files
-%license LICENSE*
+# Upstream RediSearch license file (AGPL-3.0-only).
+%license LICENSE.txt
+# Per-crate license manifest (cargo tree --edges=normal).
 %license rust-vendor-licenses.txt
+# Deduplicated bundled-project license texts (one copy per unique content).
+%license .licenses/*
 %doc *.md
-%attr(0640, redis, root) %config(noreplace) %{redis_modules_cfg}/%{cfgname}
+# search.conf is a plain "loadmodule ..." stub with no secrets; default
+# 0644 root:root keeps rpmlint happy and matches Fedora policy for
+# %%config files. The redis package owns /etc/redis and the modules dir.
+%dir %{redis_modules_cfg}
+%config(noreplace) %{redis_modules_cfg}/%{cfgname}
 %dir %{redis_modules_dir}
 %{redis_modules_dir}/%{libname}
 %{redis_modules_dir}/lib*.so*
 
 
 %changelog
-* Tue Apr 14 2026 Angel Yanev <angel.yanev@redis.com> - 1.0.0-1
-- Development packaging: RPM ``Version`` 1.0.0; upstream sources and tarballs remain ``%{upstream_version}`` (see ``%%global upstream_version``).
+* Sun Apr 26 2026 Angel Yanev <angel.yanev@redis.com> - 1.0.0-1
+- Initial development packaging.
